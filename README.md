@@ -1,11 +1,25 @@
 # Aula prática UEPG — RNA-Seq em *Arabidopsis thaliana*
 
+![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04%2B-E95420?logo=ubuntu&logoColor=white)
+![RNA--Seq](https://img.shields.io/badge/RNA--Seq-Pipeline-087E8B)
+![Arabidopsis](https://img.shields.io/badge/Arabidopsis-TAIR10-238636)
+![STAR](https://img.shields.io/badge/STAR-Alinhamento-2563EB)
+![featureCounts](https://img.shields.io/badge/featureCounts-Quantificação-9A6700)
+![DESeq2](https://img.shields.io/badge/DESeq2-Expressão_diferencial-8250DF)
+
+
 **BioProject NCBI:** [PRJNA904764](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA904764)  
+
 **Tema:** resposta transcricional ao estresse hídrico em tecido aéreo (*shoot*) de *Arabidopsis*.  
+
 **Pergunta científica:** quais genes diferem em expressão entre plantas irrigadas (*Watered_Day1*) e plantas submetidas ao tratamento de seca (*Drought_Day1*) no mesmo ponto de coleta (*Day1*)?  
+
 **Pipeline:** SRA Toolkit → FastQC/MultiQC → STAR → featureCounts → DESeq2.  
+
 **Sistema operacional:** Linux Ubuntu.  
+
 **Desenho experimental:** seis runs RNA-Seq single-end: três controles e três tratados.  
+
 **Dados verificados:** `META/SraRunTable.csv`, exportado do NCBI SRA Run Selector e incluído neste material; `META/samples.tsv` já está preenchido para os scripts.
 
 ## Amostras selecionadas (seleção fechada)
@@ -51,14 +65,16 @@ Todos os comandos abaixo devem ser executados na raiz `PRJNA904764/`. A pasta pr
 
 ## Etapa 0 — Instalar ferramentas e preparar o ambiente
 
+> [!NOTE]
+> Os comandos pressupõem Linux Ubuntu e ferramentas instaladas. Configure `THREADS=2` em computadores com recursos limitados.
+
 Em Linux com `micromamba` instalado (pode-se usar `mamba` ou `conda` com a mesma lista de pacotes):
 
 ```bash
-micromamba create -y -n rnaseq-uepg -c conda-forge -c bioconda \
-  sra-tools star subread samtools fastqc multiqc \
+micromamba create -y -n rnaseq-uepg -c conda-forge -c bioconda \\
+  sra-tools star subread samtools fastqc multiqc \\
   r-base bioconductor-deseq2 python curl
 micromamba activate rnaseq-uepg
-
 prefetch --version
 fasterq-dump --version
 STAR --version
@@ -84,32 +100,32 @@ Para máquinas com poucos recursos, comece com **2 threads** e reserve **10–15
 O arquivo `META/samples.tsv` está **pronto** no pacote; você não precisa descobrir os SRRs ou criar a matriz manualmente. Este é o seu conteúdo (separado por tabulações):
 
 ```tsv
-run	condition	replicate
-SRR22397138	controle	1
-SRR22397137	controle	2
-SRR22397135	controle	3
-SRR22397141	tratamento	1
-SRR22397140	tratamento	2
-SRR22397139	tratamento	3
+run condition replicate
+SRR22397138 controle  1
+SRR22397137 controle  2
+SRR22397135 controle  3
+SRR22397141 tratamento  1
+SRR22397140 tratamento  2
+SRR22397139 tratamento  3
 ```
 
 As colunas significam:
 
 - `run`: accession SRR, usado para baixar e identificar cada FASTQ e BAM;
+
 - `condition`: fator do DESeq2, com valores **exatamente** `controle` ou `tratamento` (essas grafias devem ser mantidas, pois o script R as espera);
+
 - `replicate`: número da réplica dentro de cada grupo.
 
 Para **reconstruir e conferir** o arquivo a partir do CSV enviado, execute:
 
 ```bash
 python3 scripts/00_metadados.py --csv META/SraRunTable.csv --list
-
-python3 scripts/00_metadados.py \
-  --csv META/SraRunTable.csv \
-  --control shoot_Watered_Day1 \
-  --treated shoot_Drought_Day1 \
+python3 scripts/00_metadados.py \\
+  --csv META/SraRunTable.csv \\
+  --control shoot_Watered_Day1 \\
+  --treated shoot_Drought_Day1 \\
   --out META/samples.tsv
-
 cat META/samples.tsv
 ```
 
@@ -118,10 +134,9 @@ O script `00_metadados.py` aceita tanto o formato `SraRunTable.csv` (colunas `Li
 Também é possível baixar uma tabela atualizada do NCBI, **opcionalmente**, sem baixar reads:
 
 ```bash
-curl -fL --retry 3 \
-  'https://trace.ncbi.nlm.nih.gov/Traces/sra-db-be/runinfo?acc=PRJNA904764' \
+curl -fL --retry 3 \\
+  'https://trace.ncbi.nlm.nih.gov/Traces/sra-db-be/runinfo?acc=PRJNA904764' \\
   -o META/runinfo.csv
-
 python3 scripts/00_metadados.py --csv META/runinfo.csv --list
 ```
 
@@ -131,6 +146,9 @@ Se desejar repetir a seleção no `runinfo.csv`, use os mesmos argumentos `--con
 
 ## Etapa 2 — Baixar raw reads com SRA Toolkit
 
+> [!WARNING]
+> O `fasterq-dump` utiliza espaço temporário adicional. Reserve pelo menos 10–15 GB livres e baixe somente os seis SRRs selecionados.
+
 ```bash
 bash scripts/01_download.sh
 ls -lh FASTQ/
@@ -138,11 +156,14 @@ ls -lh FASTQ/
 
 Para cada SRR, `prefetch` baixa o SRA em `SRA/`, `fasterq-dump` converte para FASTQ single-end, `gzip -1` compacta o resultado. O script remove a cópia `.sra` **após** verificar a integridade do FASTQ compactado. O limite de download por run é 250 MB. Cada amostra é processada separadamente para economizar disco.
 
-**Atenção ao armazenamento:** os 530,8 MB somados na tabela representam os arquivos *SRA compactados* informados pelo NCBI; `fasterq-dump` cria dados descompactados e arquivos temporários possivelmente muito maiores. Não baixe 139 experimentos de uma vez. Se um run não for single-end, interrompa e atualize a seleção; o script é intencionalmente específico para single-end.
+**Atenção ao armazenamento:** os 530,8 MB somados na tabela representam os arquivos **SRA compactados** informados pelo NCBI; `fasterq-dump` cria dados descompactados e arquivos temporários possivelmente muito maiores. Não baixe 139 experimentos de uma vez. Se um run não for single-end, interrompa e atualize a seleção; o script é intencionalmente específico para single-end.
 
-*Discussão:* explique as quatro linhas do formato FASTQ e a distinção entre sequência e scores Phred.
+**Discussão:** explique as quatro linhas do formato FASTQ e a distinção entre sequência e scores Phred.
 
 ## Etapa 3 — Baixar referência e indexar com STAR
+
+> [!IMPORTANT]
+> Use genoma FASTA e anotação GTF da mesma montagem e release (TAIR10/Ensembl Plants 63). Misturar referências pode comprometer o alinhamento e a contagem.
 
 ```bash
 bash scripts/02_referencia.sh
@@ -174,9 +195,12 @@ cat BAM/SRR*_Log.final.out | grep -E 'Uniquely mapped reads %|Number of input re
 
 Alinha **uma amostra por vez**, com duas threads, lê `.fastq.gz` com `zcat`, escreve BAM ordenado por posição genômica e cria `.bai` com `samtools index`. Todos os BAM devem existir antes de contar. Confira o mapeamento único e as reads não alinhadas.
 
-*Discussão:* diferença entre `SAM`, `BAM`, ordenação por coordenadas e alinhamento com splice junctions.
+**Discussão:** diferença entre `SAM`, `BAM`, ordenação por coordenadas e alinhamento com splice junctions.
 
 ## Etapa 6 — Quantificação gene-level
+
+> [!IMPORTANT]
+> Verifique se a biblioteca é *stranded* antes de definir `STRAND`. O valor `0` assume ausência de informação de orientação.
 
 ```bash
 # Padrão do exercício: não stranded. Ajustar somente após conferir a biblioteca.
@@ -190,9 +214,12 @@ cat COUNT/featureCounts.txt.summary
 
 O script `make_matrix.py` lê cabeçalhos, associa BAM por accession real, e cria automaticamente a matriz **genes x 6 amostras**, sem supor posições fixas como coluna 13 ou 18.
 
-*Discussão:* counts são contagens brutas, não TPM/FPKM, e o DESeq2 exige contagens brutas.
+**Discussão:** counts são contagens brutas, não TPM/FPKM, e o DESeq2 exige contagens brutas.
 
 ## Etapa 7 — Expressão diferencial
+
+> [!CAUTION]
+> A baixa profundidade deste conjunto limita o poder estatístico. Não interprete genes sem significância como prova de ausência de resposta à seca.
 
 ```bash
 bash scripts/run_deseq2.sh
@@ -201,11 +228,14 @@ cat DGE/summary.txt
 head -n 10 DGE/DGE_significant.tsv
 ```
 
-Modelo estatístico: `design = ~ condition` e contraste **tratamento / controle**, isto é, **Drought_Day1 / Watered_Day1**. Portanto:
+Modelo estatístico: `design = \~ condition` e contraste **tratamento / controle**, isto é, **Drought_Day1 / Watered_Day1**. Portanto:
 
 - `log2FoldChange > 0`: maior expressão em **Drought_Day1** (seca).
+
 - `log2FoldChange < 0`: maior expressão em **Watered_Day1** (irrigado).
+
 - `padj`: p-valor ajustado para múltiplos testes, por Benjamini-Hochberg.
+
 - Lista didática `DGE_significant.tsv`: `padj < 0,05` e `abs(log2FoldChange) >= 1` (critério de filtragem posterior; o teste de hipótese padrão não exige limiar de fold-change).
 
 Saídas:
@@ -229,23 +259,39 @@ Saídas:
 ## Etapa 8 — Questões
 
 1. Explique por que o formato FASTQ tem quatro linhas por read e como os scores de qualidade são representados.
+
 2. Descreva como o STAR identifica reads que atravessam junções éxon-éxon.
+
 3. Calcule o percentual de reads unicamente mapeadas de cada amostra e identifique anomalias.
+
 4. Explique por que `-t exon -g gene_id` é apropriado e por que `-t gene -g gene_name` pode produzir contagens problemáticas.
+
 5. Verifique quantos genes passaram no pré-filtro; justifique o critério de 10 counts em 3 amostras.
+
 6. Interprete os PC1 e PC2 no gráfico PCA. As réplicas biológicas de uma mesma condição formam grupos?
+
 7. Diferencie `pvalue` de `padj` e explique o controle da taxa de falsas descobertas (FDR).
+
 8. Se `log2FoldChange=2`, qual o fator de aumento no grupo tratado? E se `log2FoldChange=-1`?
+
 9. Pesquise a função de dois genes com `padj < 0,05` e discuta sua possível relação com respostas à seca, citando TAIR/UniProt/artigos.
+
 10. Compare a interpretação com a análise completa do artigo original e discuta os efeitos do menor número de reads.
 
 ## Referências
 
 1. [NCBI — BioProject PRJNA904764](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA904764)
+
 2. [NCBI — SRA Run Selector (PRJNA904764)](https://www.ncbi.nlm.nih.gov/Traces/study/?acc=PRJNA904764); metadados em `META/SraRunTable.csv`
+
 3. [NCBI — Run SRR22397139](https://trace.ncbi.nlm.nih.gov/Traces/index.html?run=SRR22397139)
+
 4. [Artigo — Gonzalez et al., eLife 2024](https://elifesciences.org/articles/84747)
+
 5. [NCBI — Downloading SRA data](https://www.ncbi.nlm.nih.gov/sra/docs/sradownload/)
+
 6. [STAR manual](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf)
+
 7. [Ensembl Plants — Arabidopsis TAIR10](https://jun2026-plants.ensembl.org/Arabidopsis_thaliana/Info/Index)
+
 8. [DESeq2 — vignette oficial](https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html)
